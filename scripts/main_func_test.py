@@ -125,10 +125,10 @@ def process_single_piece(y_piece, thetas, s=2, g=4, bounds_factor_low=0.3, bound
     H = np.array(H)
     bounds = (bounds_factor_low * g, bounds_factor_high * g)
     
-    # 根据solver参数选择求解器
+    # Select solver based on solver parameter
     if solver.lower() == 'sgd':
         solve_func = solve_sgd
-    else:  # 默认为 'lp'
+    else:  # Default to 'lp'
         solve_func = solve_lp
     
     x_grouped = solve_func(H, y_piece, bounds=bounds, lam=lam)

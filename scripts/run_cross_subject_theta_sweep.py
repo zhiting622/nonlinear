@@ -46,7 +46,7 @@ def main():
     
     # Training parameters
     train_subject = "S1"
-    train_theta = 20.0
+    train_theta = 10.0
     
     # Use fixed L=16 for both training and testing
     # This avoids dimension mismatch and data leakage issues
@@ -85,8 +85,8 @@ def main():
     
     # Parameters for theta sweep
     test_subject = "S3"
-    theta_gt = 20.0  # Ground truth theta used to generate y_obs (for generating y_obs only)
-    theta_candidates = [5, 7, 9, 11, 13, 15, 17, 18, 19, 20, 21, 22, 23, 25, 27, 29]
+    theta_gt = 10.0  # Ground truth theta used to generate y_obs (for generating y_obs only)
+    theta_candidates = [5, 7, 8, 9, 10, 11, 12, 13, 15, 17, 18, 19, 20, 21, 22, 23, 25, 27, 29]
     
     # SGD parameters
     num_iters = 1000  # As requested

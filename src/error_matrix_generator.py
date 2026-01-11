@@ -35,10 +35,10 @@ def generate_error_matrix(y, runs=100, thetas=np.arange(1, 31), s=2, g=4, solver
         g: grouping factor
         solver: 'lp' for linear programming or 'sgd' for stochastic gradient descent
     """
-    # 根据solver参数选择求解器
+    # Select solver based on solver parameter
     if solver.lower() == 'sgd':
         solve_func = solve_sgd
-    else:  # 默认为 'lp'
+    else:  # Default to 'lp'
         solve_func = solve_lp
     
     errs = np.empty((runs, len(thetas)))
