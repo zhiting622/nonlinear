@@ -95,7 +95,7 @@ def prepare_training_data(x_full, t_full, y_full, t_y, theta_seconds, L, s=2):
 def train_nn_forward(
     subject_name="S1",
     theta_seconds=10.0,
-    L=16,
+    L=32,
     num_epochs=20,
     learning_rate=1e-3,
     batch_size=32,
@@ -300,7 +300,7 @@ def main():
     # Parameters
     subject_name = "S1"
     theta_seconds = 10.0  # window length in seconds
-    L = 16                # fixed input length
+    L = 32                # fixed input length
     num_epochs = 20
     learning_rate = 1e-3
     batch_size = 32

@@ -37,7 +37,7 @@ def run_theta_sweep(
     subject="S1",
     theta_gt=10.0,
     theta_candidates=[4, 6, 8, 10, 12, 14, 16, 18, 20],
-    L=16,
+    L=32,
     hidden_dim=16,
     s=2,
     num_iters=1000,
@@ -276,7 +276,7 @@ def main():
     subject = "S2"
     theta_gt = 10.0
     theta_candidates = [4, 6, 8, 10, 12, 14, 16, 18]
-    L = 16
+    L = 32
     hidden_dim = 16
     s = 2
     num_iters = 1000

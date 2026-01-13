@@ -26,7 +26,7 @@ def eval_nn_forward(
     subject_name="S2",
     model_path=None,
     theta_seconds=10.0,
-    L=16,
+    L=32,
     hidden_dim=16,
     s=2
 ):
@@ -179,7 +179,7 @@ def main():
     # Parameters (must match training parameters)
     subject_name = "S2"
     theta_seconds = 10.0  # window length in seconds
-    L = 16                # fixed input length
+    L = 32                # fixed input length
     hidden_dim = 16       # hidden dimension
     s = 2                 # sampling interval for generating y
     

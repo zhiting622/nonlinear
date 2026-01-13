@@ -41,7 +41,7 @@ def run_inverse_nn_single_theta(
     subject="S1",
     theta_gt=10.0,
     candidate_thetas=[10.0],  # Start with single theta for validation
-    L=16,
+    L=32,
     hidden_dim=16,
     s=2,
     num_iters=1000,
@@ -302,7 +302,7 @@ def main():
     subject = "S2"
     theta_gt = 10.0
     candidate_thetas = [10.0]  # Start with single theta (only one model available)
-    L = 16
+    L = 32
     hidden_dim = 16
     s = 2
     num_iters = 1000  # Increased to allow more learning

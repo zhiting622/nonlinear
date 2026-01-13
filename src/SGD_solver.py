@@ -140,7 +140,7 @@ def solve_constrained_ls(H, y, bounds=(0.9, 6.0), lam=0, learning_rate=0.001,
             if iteration > 0 and iteration % 200 == 0:
                 lr = lr * 0.95  # Slower decay
             
-            if verbose and iteration % 200 == 0:
+            if verbose and iteration % 10 == 0:
                 print(f"Iteration {iteration}, loss={loss:.6f}, best_loss={best_loss:.6f}, lr={lr:.6f}")
     
     # Return best solution
@@ -214,7 +214,7 @@ def solve_x_sgd(
     with torch.no_grad():
         y_hat_init = forward_fn(x)
         residual_init = y_hat_init - y_obs_t
-        loss_data_init = torch.mean(residual_init ** 2)  # MSE
+        loss_data_init = torch.mean(torch.abs(residual_init))  # L1
         loss_reg_init = torch.tensor(0.0, device=device)
         if lam > 0:
             Dx_init = torch.matmul(D, x)
@@ -232,15 +232,23 @@ def solve_x_sgd(
     no_improve_count = 0
     prev_loss = float('inf')
     
+    # Early stopping based on window improvement rate
+    # Parameters: k=20 (window size), p=10 (number of consecutive windows), threshold=0.005 (0.5%)
+    k_window = 20  # Check every k iterations
+    p_consecutive = 10  # Need p consecutive windows with low improvement
+    improvement_threshold = 0.005  # 0.5% improvement threshold
+    consecutive_low_improvement = 0  # Counter for consecutive windows with low improvement
+    min_iterations_before_window_check = k_window * p_consecutive  # Need at least 200 iterations before checking
+    
     for iteration in range(num_iters):
         optimizer.zero_grad()
         
         # Forward pass
         y_hat_t = forward_fn(x)  # (M,)
         
-        # Data mismatch loss: MSE (can be changed to L1)
+        # Data mismatch loss: L1 (MAE)
         residual = y_hat_t - y_obs_t
-        loss_data = torch.mean(residual ** 2)  # MSE
+        loss_data = torch.mean(torch.abs(residual))  # L1
         
         # TV regularization penalty
         loss_reg = torch.tensor(0.0, device=device)
@@ -344,7 +352,35 @@ def solve_x_sgd(
                     print(f"SGD converged at iteration {iteration}, loss={loss_val:.6f}, rel_change={rel_change:.8f}")
                 break
         
-        # Early stopping (only after minimum iterations)
+        # Early stopping based on window improvement rate (new method)
+        # Check every k_window iterations, starting after min_iterations_before_window_check
+        if iteration >= min_iterations_before_window_check and (iteration + 1) % k_window == 0:
+            # Calculate window improvement rate: r_t = (L_{t-k} - L_t) / L_{t-k}
+            idx_t = iteration
+            idx_t_minus_k = idx_t - k_window
+            
+            if idx_t_minus_k >= 0 and losses[idx_t_minus_k] > 1e-10:  # Avoid division by zero
+                L_t_minus_k = losses[idx_t_minus_k]
+                L_t = losses[idx_t]
+                improvement_rate = (L_t_minus_k - L_t) / L_t_minus_k
+                
+                # Check if improvement rate is below threshold
+                if improvement_rate <= improvement_threshold:
+                    consecutive_low_improvement += 1
+                    if verbose:
+                        print(f"  Window check at iteration {iteration}: improvement_rate={improvement_rate:.6f} (threshold={improvement_threshold}), consecutive_low={consecutive_low_improvement}/{p_consecutive}")
+                else:
+                    consecutive_low_improvement = 0  # Reset counter if improvement is significant
+                    if verbose:
+                        print(f"  Window check at iteration {iteration}: improvement_rate={improvement_rate:.6f} (above threshold), reset counter")
+                
+                # Stop if we have p consecutive windows with low improvement
+                if consecutive_low_improvement >= p_consecutive:
+                    if verbose:
+                        print(f"SGD stopped early at iteration {iteration} (window-based early stopping: {p_consecutive} consecutive windows with improvement_rate <= {improvement_threshold})")
+                    break
+        
+        # Legacy early stopping (only after minimum iterations)
         # DO NOT reassign x here - we'll use best_x at the end instead
         min_iterations_before_early_stop = 100
         if iteration >= min_iterations_before_early_stop and no_improve_count >= patience:
@@ -360,10 +396,18 @@ def solve_x_sgd(
             for param_group in optimizer.param_groups:
                 param_group['lr'] *= 0.95
         
-        if verbose and iteration % 100 == 0 and iteration >= 5:  # Skip if already printed in first 5 iterations
-            with torch.no_grad():
-                delta_x_current = (x.data - x_init_saved).norm().item() / (x_init_saved.norm().item() + 1e-10)
-            print(f"Iteration {iteration}, loss={loss_val:.6f}, best_loss={best_loss:.6f}, grad_norm={grad_norm:.6f}, delta_x={delta_x_current:.6f}, lr={optimizer.param_groups[0]['lr']:.6f}")
+        # Print verbose output: every 10 iterations for first 100 iterations, then every 100 iterations
+        if verbose:
+            should_print = False
+            if iteration < 100 and iteration >= 5 and iteration % 10 == 0:  # Every 10 iters for first 100 (skip first 5 detailed prints)
+                should_print = True
+            elif iteration >= 100 and iteration % 100 == 0:  # Every 100 iters after 100
+                should_print = True
+            
+            if should_print:
+                with torch.no_grad():
+                    delta_x_current = (x.data - x_init_saved).norm().item() / (x_init_saved.norm().item() + 1e-10)
+                print(f"Iteration {iteration}, loss={loss_val:.6f}, best_loss={best_loss:.6f}, grad_norm={grad_norm:.6f}, delta_x={delta_x_current:.6f}, lr={optimizer.param_groups[0]['lr']:.6f}")
         
         # Even when verbose=False, print every 200 iterations to show progress
         if not verbose and iteration > 0 and iteration % 200 == 0:
