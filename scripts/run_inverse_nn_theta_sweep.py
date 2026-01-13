@@ -201,17 +201,23 @@ def run_theta_sweep(
     return results
 
 
-def save_results(subject, theta_candidates, results):
+def save_results(subject, theta_candidates, results, theta_gt=None):
     """Save results to JSON file."""
     output_dir = os.path.join(project_root, "results", "theta_sweep")
     os.makedirs(output_dir, exist_ok=True)
     
-    json_path = os.path.join(output_dir, f"theta_sweep_results_S{subject}.json")
+    # Include theta_gt in filename if provided
+    if theta_gt is not None:
+        json_path = os.path.join(output_dir, f"theta_sweep_results_S{subject}_theta_gt_{theta_gt}.json")
+    else:
+        json_path = os.path.join(output_dir, f"theta_sweep_results_S{subject}.json")
     
     output_data = {
         "theta_candidates": theta_candidates,
         "results": results
     }
+    if theta_gt is not None:
+        output_data["theta_gt"] = theta_gt
     
     with open(json_path, 'w') as f:
         json.dump(output_data, f, indent=2)
@@ -219,7 +225,7 @@ def save_results(subject, theta_candidates, results):
     return json_path
 
 
-def plot_error_curve(subject, theta_candidates, results):
+def plot_error_curve(subject, theta_candidates, results, theta_gt=None):
     """Plot error curve (final_loss vs theta)."""
     # Extract theta values and corresponding final_loss values
     thetas = []
@@ -241,7 +247,11 @@ def plot_error_curve(subject, theta_candidates, results):
     
     ax.set_xlabel("Theta (seconds)", fontsize=12)
     ax.set_ylabel("Final inverse loss", fontsize=12)
-    ax.set_title(f"Theta Sweep Error Curve (Subject S{subject})", fontsize=14)
+    # Include theta_gt in title if provided
+    if theta_gt is not None:
+        ax.set_title(f"Theta Sweep Error Curve (Subject S{subject}, theta_gt={theta_gt})", fontsize=14)
+    else:
+        ax.set_title(f"Theta Sweep Error Curve (Subject S{subject})", fontsize=14)
     ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
@@ -249,7 +259,11 @@ def plot_error_curve(subject, theta_candidates, results):
     # Save plot
     output_dir = os.path.join(project_root, "results", "theta_sweep")
     os.makedirs(output_dir, exist_ok=True)
-    plot_path = os.path.join(output_dir, f"error_curve_final_loss_S{subject}.png")
+    # Include theta_gt in filename if provided
+    if theta_gt is not None:
+        plot_path = os.path.join(output_dir, f"error_curve_final_loss_S{subject}_theta_gt_{theta_gt}.png")
+    else:
+        plot_path = os.path.join(output_dir, f"error_curve_final_loss_S{subject}.png")
     plt.savefig(plot_path, dpi=150, bbox_inches='tight')
     plt.close()
     
