@@ -28,7 +28,8 @@ from src.data_loader import load_x
 from src.y_generator import generate_y
 from src.nn_forward_wrapper import (
     load_frozen_window_nn,
-    nn_forward_full_sequence_with_grad
+    nn_forward_full_sequence_with_grad,
+    precompute_window_indices,
 )
 from src.SGD_solver import solve_x_sgd
 
@@ -94,11 +95,21 @@ def _process_single_theta_candidate(args):
         noise_std = 0.05 * x_init.std().item()
         x_init = x_init + noise_std * torch.randn_like(x_init)
         y_obs_t = torch.FloatTensor(y_obs_np_valid).to(device)
+
+        # Precompute window indices once per theta candidate (reused across SGD iterations)
+        window_indices = precompute_window_indices(
+            t_full_np=t_full_np,
+            t_y_np=t_y_np,
+            theta_seconds=float(theta_candidate),
+            time_offset=0.0,
+            skip_first=True,
+        )
         
         # Define forward function
         def forward_fn(x_t):
             return nn_forward_full_sequence_with_grad(
-                x_t, t_full_np, t_y_np, theta_candidate, model, L, device=device
+                x_t, t_full_np, t_y_np, theta_candidate, model, L, device=device,
+                window_indices=window_indices,
             )
         
         # Run SGD optimization

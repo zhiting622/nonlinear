@@ -8,10 +8,54 @@ across time-based windows to generate full-sequence predictions.
 import numpy as np
 import torch
 import torch.nn as nn
-from typing import Optional
+from typing import Optional, Tuple
 
 from src.piece_utils import extract_and_resample_window
 from src.nn_forward import WindowNN
+
+
+def precompute_window_indices(
+    t_full_np: np.ndarray,   # (N,), monotonic increasing
+    t_y_np: np.ndarray,      # (M,)
+    theta_seconds: float,
+    time_offset: float = 0.0,
+    skip_first: bool = True,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Precompute window slice indices for each y timepoint.
+    
+    This turns per-window O(N) masking into O(log N) binary searches done once,
+    so SGD iterations can reuse (start_idx, end_idx) arrays.
+    
+    Boundary semantics match the original mask:
+      mask = (t_full_np >= window_start) & (t_full_np <= window_end)
+    implemented via:
+      start = searchsorted(t_full_np, window_start, side="left")
+      end   = searchsorted(t_full_np, window_end,   side="right")
+    
+    Args:
+        t_full_np: timestamps in seconds, shape (N,), must be non-decreasing
+        t_y_np: y time points in seconds, shape (M,)
+        theta_seconds: window length in seconds
+        time_offset: optional offset added to all center_time values
+        skip_first: if True, compute for indices 1..M-1 (matches forward skipping index 0)
+    
+    Returns:
+        start_idx: np.ndarray of shape (M-1,) if skip_first else (M,)
+        end_idx:   np.ndarray of shape (M-1,) if skip_first else (M,)
+    """
+    if skip_first:
+        centers = t_y_np[1:] + time_offset
+    else:
+        centers = t_y_np + time_offset
+    
+    window_starts = centers - theta_seconds
+    window_ends = centers
+    
+    start_idx = np.searchsorted(t_full_np, window_starts, side="left").astype(np.int64)
+    end_idx = np.searchsorted(t_full_np, window_ends, side="right").astype(np.int64)
+    
+    return start_idx, end_idx
 
 
 def torch_linear_resample_1d(x_varlen: torch.Tensor, L: int) -> torch.Tensor:
@@ -187,6 +231,7 @@ def nn_forward_full_sequence_with_grad(
     L: int,
     device: str = "cpu",
     time_offset: float = 0.0,
+    window_indices: Optional[Tuple[np.ndarray, np.ndarray]] = None,
 ) -> torch.Tensor:
     """
     Differentiable forward used inside SGD. Returns y_hat_t: torch.Tensor shape (M-1,).
@@ -218,21 +263,31 @@ def nn_forward_full_sequence_with_grad(
     
     # Skip index 0 (boundary effect, same as Phase B)
     valid_indices = range(1, M)
+
+    # Precompute window slice indices if not provided (still much cheaper than O(N) masks)
+    if window_indices is None:
+        start_idx_arr, end_idx_arr = precompute_window_indices(
+            t_full_np=t_full_np,
+            t_y_np=t_y_np,
+            theta_seconds=theta_seconds,
+            time_offset=time_offset,
+            skip_first=True,
+        )
+    else:
+        start_idx_arr, end_idx_arr = window_indices
     
-    for i in valid_indices:
-        center_time = t_y_np[i] + time_offset
-        
-        # Find window indices using numpy (constant, no gradient)
-        window_start = center_time - theta_seconds
-        window_end = center_time
-        mask = (t_full_np >= window_start) & (t_full_np <= window_end)
-        
-        # Extract window from x_full_t (this maintains gradients)
-        x_window_varlen = x_full_t[mask]
+    for k, i in enumerate(valid_indices):
+        # Extract window from x_full_t via precomputed slice (maintains gradients)
+        start_idx = int(start_idx_arr[k])
+        end_idx = int(end_idx_arr[k])
+        x_window_varlen = x_full_t[start_idx:end_idx]
         
         # Check if window is empty
         if len(x_window_varlen) == 0:
             # Should not happen for i > 0 (since we skip index 0), but handle gracefully
+            center_time = t_y_np[i] + time_offset
+            window_start = center_time - theta_seconds
+            window_end = center_time
             raise ValueError(
                 f"Empty window at index {i}, center_time={center_time:.2f}, "
                 f"window_range=[{window_start:.2f}, {window_end:.2f}]"

@@ -75,9 +75,13 @@ def extract_and_resample_window(
     window_start = center_time - theta_seconds
     window_end = center_time
     
-    # Find indices where t_full is in the window
-    mask = (t_full >= window_start) & (t_full <= window_end)
-    x_window = x_full[mask]
+    # Fast window extraction using binary search (t_full is monotonic increasing)
+    # Keep boundary semantics consistent with mask:
+    # - include left boundary: t_full >= window_start  -> side="left"
+    # - include right boundary: t_full <= window_end   -> side="right"
+    start_idx = int(np.searchsorted(t_full, window_start, side="left"))
+    end_idx = int(np.searchsorted(t_full, window_end, side="right"))
+    x_window = x_full[start_idx:end_idx]
     
     # Check if window is empty
     if len(x_window) == 0:
@@ -86,7 +90,7 @@ def extract_and_resample_window(
                         f"window_range=[{window_start}, {window_end}]")
     
     # Get corresponding time points for the selected window
-    t_window = t_full[mask]
+    t_window = t_full[start_idx:end_idx]
     
     # Normalize time axis to [0, theta_seconds] for interpolation
     # Original sample points' time axis

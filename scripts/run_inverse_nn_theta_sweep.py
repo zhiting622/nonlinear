@@ -26,7 +26,8 @@ from src.data_loader import load_x
 from src.y_generator import generate_y
 from src.nn_forward_wrapper import (
     load_frozen_window_nn,
-    nn_forward_full_sequence_with_grad
+    nn_forward_full_sequence_with_grad,
+    precompute_window_indices,
 )
 from src.SGD_solver import solve_x_sgd
 
@@ -140,11 +141,21 @@ def run_theta_sweep(
         print(f"Processing theta_candidate={theta_candidate} ({idx+1}/{len(theta_candidates)})...", end=" ", flush=True)
         
         try:
+            # Precompute window indices once per theta candidate (reused across SGD iterations)
+            window_indices = precompute_window_indices(
+                t_full_np=t_full_np,
+                t_y_np=t_y_np,
+                theta_seconds=float(theta_candidate),
+                time_offset=0.0,
+                skip_first=True,
+            )
+
             # Use the same model (trained with theta=10), but forward uses theta_candidate
             # This tests how each candidate performs with the theta=10 trained model
             def forward_fn(x_t):
                 return nn_forward_full_sequence_with_grad(
-                    x_t, t_full_np, t_y_np, theta_candidate, model, L, device=device
+                    x_t, t_full_np, t_y_np, theta_candidate, model, L, device=device,
+                    window_indices=window_indices,
                 )
             
             # Run SGD optimization with minimal progress output

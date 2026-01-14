@@ -1,0 +1,64 @@
+{
+  "fold": 1,
+  "train_subjects": [
+    "S1",
+    "S10",
+    "S12",
+    "S14",
+    "S6"
+  ],
+  "test_subjects": [
+    "S11",
+    "S13",
+    "S15",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S7",
+    "S8",
+    "S9"
+  ],
+  "subject_results": {
+    "S11": {
+      "subject": "S11",
+      "theta_results": {}
+    },
+    "S13": {
+      "subject": "S13",
+      "theta_results": {}
+    },
+    "S15": {
+      "subject": "S15",
+      "theta_results": {}
+    },
+    "S2": {
+      "subject": "S2",
+      "theta_results": {}
+    },
+    "S3": {
+      "subject": "S3",
+      "theta_results": {}
+    },
+    "S4": {
+      "subject": "S4",
+      "theta_results": {}
+    },
+    "S5": {
+      "subject": "S5",
+      "theta_results": {}
+    },
+    "S7": {
+      "subject": "S7",
+      "theta_results": {}
+    },
+    "S8": {
+      "subject": "S8",
+      "theta_results": {}
+    },
+    "S9": {
+      "subject": "S9",
+      "theta_results": {}
+    }
+  }
+}

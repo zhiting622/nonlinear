@@ -28,6 +28,54 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import datetime
 
+# ============================================================================
+# Platform-aware parallelism helpers
+# ============================================================================
+
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def get_max_workers(protocol: dict, kind: str, default_fallback: int) -> int:
+    """
+    Determine max_workers for ProcessPoolExecutor in a platform-safe way.
+    
+    On Windows, spawning many processes that import PyTorch can exhaust virtual memory
+    (WinError 1455). We cap workers by default and allow overriding via env vars:
+      - NONLINEAR_MAX_WORKERS_TRAIN
+      - NONLINEAR_MAX_WORKERS_TEST
+      - NONLINEAR_MAX_WORKERS (applies to both if specific not set)
+    
+    Args:
+        protocol: experimental protocol dict
+        kind: "train" or "test"
+        default_fallback: used if protocol doesn't specify n_cores
+    """
+    requested = protocol.get("parallelization", {}).get("n_cores", None)
+    if requested is None:
+        requested = os.cpu_count() or default_fallback
+
+    # Optional env override
+    env_specific = os.environ.get(f"NONLINEAR_MAX_WORKERS_{kind.upper()}")
+    env_global = os.environ.get("NONLINEAR_MAX_WORKERS")
+    env_val = env_specific or env_global
+    if env_val:
+        try:
+            requested = int(env_val)
+        except ValueError:
+            pass
+
+    requested = max(1, int(requested))
+    requested = min(requested, os.cpu_count() or requested)
+
+    if _is_windows():
+        # Conservative cap to avoid WinError 1455 on typical desktops.
+        # Users can override via env vars above.
+        safe_cap = 8
+        requested = min(requested, safe_cap)
+
+    return requested
+
 # Optimize PyTorch for CPU performance
 torch.set_num_threads(os.cpu_count() or 56)
 torch.set_num_interop_threads(os.cpu_count() or 56)
@@ -41,7 +89,8 @@ from src.y_generator import generate_y
 from src.nn_forward import WindowNN
 from src.nn_forward_wrapper import (
     load_frozen_window_nn,
-    nn_forward_full_sequence_with_grad
+    nn_forward_full_sequence_with_grad,
+    precompute_window_indices,
 )
 from src.piece_utils import extract_and_resample_window
 from src.SGD_solver import solve_x_sgd
@@ -519,7 +568,7 @@ def _process_single_theta_candidate_parallel(args):
         torch.set_num_threads(1)
         # Don't set interop threads - it causes errors in multiprocessing
         
-        from src.nn_forward_wrapper import load_frozen_window_nn, nn_forward_full_sequence_with_grad
+        from src.nn_forward_wrapper import load_frozen_window_nn, nn_forward_full_sequence_with_grad, precompute_window_indices
         from src.SGD_solver import solve_x_sgd
         
         # Set random seed for this worker
@@ -538,11 +587,21 @@ def _process_single_theta_candidate_parallel(args):
         noise_std = 0.05 * x_init.std()
         x_init = x_init + noise_std * torch.randn_like(x_init)
         y_obs_t = torch.FloatTensor(y_obs_np_valid).to(device)
+
+        # Precompute window indices once per (subject, theta_candidate) task (reused across SGD iterations)
+        window_indices = precompute_window_indices(
+            t_full_np=t_full_np,
+            t_y_np=t_y_np,
+            theta_seconds=float(theta_candidate),
+            time_offset=0.0,
+            skip_first=True,
+        )
         
         # Define forward function
         def forward_fn(x_t):
             return nn_forward_full_sequence_with_grad(
-                x_t, t_full_np, t_y_np, theta_candidate, model, L, device=device
+                x_t, t_full_np, t_y_np, theta_candidate, model, L, device=device,
+                window_indices=window_indices,
             )
         
         # Run SGD optimization
@@ -713,9 +772,17 @@ def run_theta_sweep_single_subject(
                 y_obs_t = torch.FloatTensor(y_obs_np_valid).to(device)
                 
                 # Define forward function
+                window_indices = precompute_window_indices(
+                    t_full_np=t_full_np,
+                    t_y_np=t_y_np,
+                    theta_seconds=float(theta_candidate),
+                    time_offset=0.0,
+                    skip_first=True,
+                )
                 def forward_fn(x_t):
                     return nn_forward_full_sequence_with_grad(
-                        x_t, t_full_np, t_y_np, theta_candidate, model, L, device=device
+                        x_t, t_full_np, t_y_np, theta_candidate, model, L, device=device,
+                        window_indices=window_indices,
                     )
                 
                 # Run SGD optimization
@@ -1022,10 +1089,9 @@ def run_phase_1_1_cross_validation(protocol, output_base_dir=None):
         print(f"  Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"  Estimated time: {format_time(est_step1_time)}")
         
-        # Get max_workers for training
-        max_workers_train = protocol.get("parallelization", {}).get("n_cores", None)
-        if max_workers_train is None:
-            max_workers_train = min(len(theta_gts), os.cpu_count() or 4)
+        # Get max_workers for training (platform-safe)
+        max_workers_train = get_max_workers(protocol, kind="train", default_fallback=4)
+        max_workers_train = min(max_workers_train, len(theta_gts))
         
         # Prepare training arguments
         train_args_list = [
@@ -1035,6 +1101,9 @@ def run_phase_1_1_cross_validation(protocol, output_base_dir=None):
         
         models = {}
         model_paths = {}  # Store model file paths for ProcessPoolExecutor
+        if os.name == "nt" and max_workers_train < (protocol.get("parallelization", {}).get("n_cores", os.cpu_count() or max_workers_train)):
+            print(f"  Note (Windows): Capping training workers to {max_workers_train} to avoid PyTorch DLL load failures (WinError 1455).", flush=True)
+            print(f"    Override with env var: NONLINEAR_MAX_WORKERS_TRAIN (or NONLINEAR_MAX_WORKERS).", flush=True)
         print(f"  Starting training for {len(train_args_list)} models with {max_workers_train} workers (ProcessPoolExecutor)...", flush=True)
         
         with ProcessPoolExecutor(max_workers=max_workers_train) as executor:
@@ -1094,10 +1163,8 @@ def run_phase_1_1_cross_validation(protocol, output_base_dir=None):
         print(f"  Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"  Estimated time: {format_time(est_step2_time)}")
         
-        # Get max_workers for testing
-        max_workers_test = protocol.get("parallelization", {}).get("n_cores", None)
-        if max_workers_test is None:
-            max_workers_test = os.cpu_count() or 56
+        # Get max_workers for testing (platform-safe)
+        max_workers_test = get_max_workers(protocol, kind="test", default_fallback=4)
         
         # Prepare all tasks: (subject, theta_gt, theta_candidate) combinations
         print("  Preparing tasks (loading data and generating y_obs)...", flush=True)
@@ -1157,6 +1224,9 @@ def run_phase_1_1_cross_validation(protocol, output_base_dir=None):
         total_tasks = len(all_tasks)
         print(f"  Task preparation completed: {total_tasks} tasks created", flush=True)
         print(f"  Total tasks: {total_tasks} (subjects × theta_gts × theta_candidates)")
+        if os.name == "nt" and max_workers_test < (protocol.get("parallelization", {}).get("n_cores", os.cpu_count() or max_workers_test)):
+            print(f"  Note (Windows): Capping testing workers to {max_workers_test} to avoid PyTorch DLL load failures (WinError 1455).", flush=True)
+            print(f"    Override with env var: NONLINEAR_MAX_WORKERS_TEST (or NONLINEAR_MAX_WORKERS).", flush=True)
         print(f"  Using {max_workers_test} workers")
         print(f"  Estimated time per task: ~{est_step2_time / total_tasks:.1f} seconds")
         print()
